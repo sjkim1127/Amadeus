@@ -6,17 +6,36 @@ pub struct AvatarPlugin;
 
 impl Plugin for AvatarPlugin {
     fn build(&self, app: &mut App) {
-        app.add_plugins(DefaultPlugins.set(WindowPlugin {
-            primary_window: Some(Window {
-                title: "Amadeus Avatar".into(),
-                transparent: true,
-                decorations: false,
-                window_level: bevy::window::WindowLevel::AlwaysOnTop,
-                resolution: (400., 600.).into(),
-                ..default()
-            }),
-            ..default()
-        }))
+        use bevy::render::{
+            settings::{RenderCreation, WgpuLimits, WgpuSettings},
+            RenderPlugin,
+        };
+
+        app.add_plugins(
+            DefaultPlugins
+                .set(WindowPlugin {
+                    primary_window: Some(Window {
+                        title: "Amadeus Avatar".into(),
+                        transparent: true,
+                        decorations: false,
+                        window_level: bevy::window::WindowLevel::AlwaysOnTop,
+                        resolution: (400., 600.).into(),
+                        ..default()
+                    }),
+                    ..default()
+                })
+                .set(RenderPlugin {
+                    render_creation: RenderCreation::Automatic(WgpuSettings {
+                        limits: WgpuLimits {
+                            // Increase limit for MToon shader / VRM bones on macOS Metal
+                            max_dynamic_uniform_buffers_per_pipeline_layout: 10,
+                            ..default()
+                        },
+                        ..default()
+                    }),
+                    ..default()
+                }),
+        )
         // VrmPlugin supports actual .vrm files with SpringBone physics
         .add_plugins(VrmPlugin)
         .insert_resource(ClearColor(Color::NONE))

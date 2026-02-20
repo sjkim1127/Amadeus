@@ -11,8 +11,6 @@ use std::sync::Arc;
 use std::sync::Mutex;
 use std::thread;
 use tokio::sync::mpsc;
-use tracing::Level;
-use tracing_subscriber::FmtSubscriber;
 
 use crate::agent::memory::MemoryManager;
 use crate::agent::persona::Persona;
@@ -67,11 +65,6 @@ async fn run_agent_loop(
     mut agent_rx: mpsc::UnboundedReceiver<String>,
     agent_tx: mpsc::UnboundedSender<Message>,
 ) -> Result<()> {
-    let subscriber = FmtSubscriber::builder()
-        .with_max_level(Level::ERROR)
-        .finish();
-    let _ = tracing::subscriber::set_global_default(subscriber);
-
     println!("AMADEUS SYSTEM ONLINE.");
 
     // Initialize Memory
