@@ -1,4 +1,4 @@
-use crate::llm::local::Message;
+use crate::llm::Message;
 
 pub struct Persona {
     pub name: String,

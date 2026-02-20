@@ -4,7 +4,7 @@ mod system;
 mod voice;
 
 use anyhow::Result;
-use serde::{Deserialize, Serialize};
+use serde::Serialize;
 use std::sync::Arc;
 use tauri::{AppHandle, Emitter, Manager};
 use tokio::sync::{mpsc, Mutex};
@@ -12,7 +12,7 @@ use tokio::sync::{mpsc, Mutex};
 use crate::agent::memory::MemoryManager;
 use crate::agent::persona::Persona;
 use crate::agent::tools::ToolDispatcher;
-use crate::llm::local::{LocalLlmClient, Message};
+use crate::llm::ollama::{Message, OllamaClient};
 
 use crate::system::browser::BrowserTool;
 use crate::system::files::FileSystemTool;
@@ -21,7 +21,7 @@ use crate::system::screenshot::ScreenshotTool;
 
 use crate::voice::tts::TtsManager;
 
-const MODEL_PATH: &str = "model/localllm/qwen2.5-7b-instruct-q4_k_m.gguf";
+const OLLAMA_MODEL: &str = "qwen2.5:7b";
 
 // ===== Tauri State =====
 
@@ -98,30 +98,33 @@ async fn run_agent_loop(
     // Initialize Memory
     let memory = MemoryManager::new("amadeus.db").await?;
 
-    // Initialize Local LLM
-    println!("[System] Loading LLM model... (this may take a moment)");
-    emit_status(&app, "Loading LLM model...", true);
+    // Initialize Ollama LLM
+    println!("[System] Connecting to Ollama (model: {})...", OLLAMA_MODEL);
+    emit_status(&app, "Connecting to Ollama...", true);
 
-    let client = match LocalLlmClient::new(MODEL_PATH) {
-        Ok(c) => Arc::new(c),
-        Err(e) => {
-            let err_msg = format!("[Error] LLM init failed: {}. Chat disabled.", e);
+    let client = Arc::new(OllamaClient::new(OLLAMA_MODEL));
+
+    match client.health_check().await {
+        Ok(true) => {
+            println!("[System] Ollama connected.");
+            emit_status(&app, "Online", false);
+        }
+        _ => {
+            let err_msg = "[Error] Ollama not running. Start it with: ollama serve";
             eprintln!("{}", err_msg);
-            emit_chat(&app, "assistant", &err_msg);
-            emit_status(&app, "LLM Error", false);
+            emit_chat(&app, "assistant", err_msg);
+            emit_status(&app, "Ollama Offline", false);
 
             while let Some(_) = agent_rx.recv().await {
                 emit_chat(
                     &app,
                     "assistant",
-                    "LLM is not loaded. Please check model path.",
+                    "Ollama is not running. Please start it with `ollama serve` and pull a model with `ollama pull qwen2.5:7b`.",
                 );
             }
             return Ok(());
         }
-    };
-    println!("[System] LLM ready.");
-    emit_status(&app, "Online", false);
+    }
 
     // Initialize Persona
     let persona = Persona::amadeus();
@@ -205,10 +208,7 @@ async fn run_agent_loop(
             let messages_clone = chat_history.clone();
             let client_clone = Arc::clone(&client);
 
-            let full_response = tokio::task::spawn_blocking(move || {
-                client_clone.chat_streaming(messages_clone, |_piece| {})
-            })
-            .await??;
+            let full_response = client_clone.chat(messages_clone).await?;
 
             let assistant_msg = Message {
                 role: "assistant".to_string(),

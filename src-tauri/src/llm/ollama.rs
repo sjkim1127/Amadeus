@@ -1,10 +1,9 @@
-
 use anyhow::Result;
+use futures_util::stream::Stream;
 use futures_util::StreamExt;
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
 use std::pin::Pin;
-use futures_util::stream::Stream;
 
 const OLLAMA_API_BASE: &str = "http://localhost:11434/api";
 
@@ -31,10 +30,10 @@ pub struct Message {
 
 #[derive(Deserialize, Debug)]
 pub struct ChatResponse {
-    pub model: String,
-    pub created_at: String,
+    pub model: Option<String>,
+    pub created_at: Option<String>,
     pub message: Option<MessageRes>,
-    pub done: bool,
+    pub done: Option<bool>,
 }
 
 #[derive(Deserialize, Debug)]
@@ -51,6 +50,48 @@ impl OllamaClient {
         }
     }
 
+    /// Check if Ollama is running and the model is available
+    pub async fn health_check(&self) -> Result<bool> {
+        let res = self
+            .client
+            .get(format!("{}/tags", OLLAMA_API_BASE))
+            .send()
+            .await;
+
+        match res {
+            Ok(r) => Ok(r.status().is_success()),
+            Err(_) => Ok(false),
+        }
+    }
+
+    /// Non-streaming chat: send messages, get full response
+    pub async fn chat(&self, messages: Vec<Message>) -> Result<String> {
+        let request = ChatRequest {
+            model: self.model.clone(),
+            messages,
+            stream: false,
+        };
+
+        let res = self
+            .client
+            .post(format!("{}/chat", OLLAMA_API_BASE))
+            .json(&request)
+            .send()
+            .await?;
+
+        if !res.status().is_success() {
+            let error_text = res.text().await?;
+            return Err(anyhow::anyhow!("Ollama API error: {}", error_text));
+        }
+
+        let response: ChatResponse = res.json().await?;
+        match response.message {
+            Some(msg) => Ok(msg.content),
+            None => Err(anyhow::anyhow!("No message in Ollama response")),
+        }
+    }
+
+    /// Streaming chat: returns a stream of content chunks
     pub async fn chat_stream(
         &self,
         messages: Vec<Message>,
@@ -74,50 +115,26 @@ impl OllamaClient {
         }
 
         let stream = res.bytes_stream();
-        
-        // Simple line buffering adapter
-        // In a real robust app, we might use tokio_util::codec::LinesCodec
-        // For now, we assume chunks contain complete lines or we handle simple fragmentation?
-        // Actually, let's use a simpler approach: 
-        // We will just map the bytes to string and assume the chunks are valid UTF-8.
-        // And then split by newline. 
-        // This is not perfect if a multibyte character is split across chunks, but strict correctness for 
-        // streaming JSON lines usually implies lines are small enough or chunks are large enough.
-        
-        let stream = stream.map(|chunk_result| {
-            match chunk_result {
-                Ok(chunk) => {
-                    let text = String::from_utf8_lossy(&chunk).to_string();
-                    Ok(text)
-                }
-                Err(e) => Err(anyhow::anyhow!("Stream error: {}", e)),
-            }
-        });
 
-        // We need to flatten the lines.
-        // This is a bit tricky with iterator/stream mix.
-        // Let's keep it simple: return the stream of strings (chunks) and let the caller handle buffering?
-        // No, let's try to parse inside.
-
-        let parsed_stream = stream.map(|text_res| {
-             match text_res {
-                Ok(text) => {
-                    let mut output = String::new();
-                     for line in text.lines() {
-                        if line.trim().is_empty() { continue; }
-                        if let Ok(response) = serde_json::from_str::<ChatResponse>(line) {
-                            if let Some(msg) = response.message {
-                                output.push_str(&msg.content);
-                            }
+        let parsed_stream = stream.map(|chunk_result| match chunk_result {
+            Ok(chunk) => {
+                let text = String::from_utf8_lossy(&chunk).to_string();
+                let mut output = String::new();
+                for line in text.lines() {
+                    if line.trim().is_empty() {
+                        continue;
+                    }
+                    if let Ok(response) = serde_json::from_str::<ChatResponse>(line) {
+                        if let Some(msg) = response.message {
+                            output.push_str(&msg.content);
                         }
                     }
-                    Ok(output)
                 }
-                Err(e) => Err(e),
-             }
+                Ok(output)
+            }
+            Err(e) => Err(anyhow::anyhow!("Stream error: {}", e)),
         });
 
         Ok(Box::pin(parsed_stream))
     }
 }
-

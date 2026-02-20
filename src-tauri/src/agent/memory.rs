@@ -1,4 +1,4 @@
-use crate::llm::local::Message;
+use crate::llm::Message;
 use anyhow::Result;
 use sqlx::{
     sqlite::{SqliteConnectOptions, SqlitePoolOptions},
