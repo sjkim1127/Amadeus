@@ -3,7 +3,7 @@ import { Canvas, useFrame, useThree } from "@react-three/fiber";
 import { OrbitControls } from "@react-three/drei";
 import * as THREE from "three";
 import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader.js";
-import { VRMLoaderPlugin, VRM } from "@pixiv/three-vrm";
+import { VRMLoaderPlugin, VRM, VRMLookAt } from "@pixiv/three-vrm";
 import { loadMixamoAnimation } from "../utils/loadMixamoAnimation";
 
 // Avatar state types
@@ -20,7 +20,48 @@ function lerp(current: number, target: number, speed: number): number {
     return current + (target - current) * speed;
 }
 
-const VrmModel: React.FC<VrmModelProps> = ({ avatarState, emotion }) => {
+// ===== VRMSmoothLookAt for Head Tracking =====
+class VRMSmoothLookAt extends VRMLookAt {
+    smoothFactor: number;
+    yawLimit: number;
+    pitchLimit: number;
+    _yawDamped: number;
+    _pitchDamped: number;
+
+    constructor(humanoid: any, applier: any) {
+        super(humanoid, applier);
+        this.smoothFactor = 10.0;
+        this.yawLimit = 45.0;
+        this.pitchLimit = 45.0;
+        this._yawDamped = 0.0;
+        this._pitchDamped = 0.0;
+    }
+
+    update(delta: number) {
+        if (this.target && this.autoUpdate) {
+            this.lookAt(this.target.getWorldPosition(new THREE.Vector3()));
+
+            if (this.yawLimit < Math.abs(this._yaw) || this.pitchLimit < Math.abs(this._pitch)) {
+                this._yaw = 0.0;
+                this._pitch = 0.0;
+            }
+
+            const k = 1.0 - Math.exp(-this.smoothFactor * delta);
+            this._yawDamped += (this._yaw - this._yawDamped) * k;
+            this._pitchDamped += (this._pitch - this._pitchDamped) * k;
+
+            this.applier?.applyYawPitch(this._yawDamped, this._pitchDamped);
+            this._needsUpdate = false;
+        }
+
+        if (this._needsUpdate) {
+            this._needsUpdate = false;
+            this.applier?.applyYawPitch(this._yaw, this._pitch);
+        }
+    }
+}
+
+const VrmModel: React.FC<VrmModelProps & { lookAtTarget: THREE.Object3D }> = ({ avatarState, emotion, lookAtTarget }) => {
     const [vrm, setVrm] = useState<VRM | null>(null);
     const { scene } = useThree();
     const clockRef = useRef(new THREE.Clock());
@@ -66,6 +107,13 @@ const VrmModel: React.FC<VrmModelProps> = ({ avatarState, emotion }) => {
                     if (rLowerArm) { rLowerArm.rotation.z = -0.15; }
                     if (lHand) lHand.rotation.z = 0.1;
                     if (rHand) rHand.rotation.z = -0.1;
+                }
+
+                // Replace default lookAt with our SmoothLookAt
+                if (vrmData.lookAt) {
+                    const smoothLookAt = new VRMSmoothLookAt(vrmData.humanoid, vrmData.lookAt.applier);
+                    (vrmData as any).lookAt = smoothLookAt;
+                    vrmData.lookAt.target = lookAtTarget;
                 }
 
                 scene.add(vrmData.scene);
@@ -184,12 +232,13 @@ const VrmModel: React.FC<VrmModelProps> = ({ avatarState, emotion }) => {
             mouthOpen = vowelCycle * consonantPause * 0.6;
         }
 
-        // ===== Blink (always active, faster when surprised) =====
+        // ===== Blink (active always, procedural) =====
         const blinkInterval = emotion === "surprised" ? 6.0 : 4.0;
         const blinkCycle = t % blinkInterval;
         let blinkWeight = 0;
-        if (blinkCycle < 0.15) {
-            blinkWeight = Math.sin((blinkCycle / 0.15) * Math.PI);
+        // Faster procedural blinks
+        if (blinkCycle < 0.1) {
+            blinkWeight = Math.sin((blinkCycle / 0.1) * Math.PI);
         }
 
         // ===== Apply Expressions =====
@@ -210,6 +259,21 @@ const VrmModel: React.FC<VrmModelProps> = ({ avatarState, emotion }) => {
     return null;
 };
 
+// ===== Mouse Tracking Component =====
+const MouseTracking: React.FC<{ target: THREE.Object3D }> = ({ target }) => {
+    useEffect(() => {
+        const handleMouseMove = (event: MouseEvent) => {
+            const x = 5.0 * ((event.clientX - 0.5 * window.innerWidth) / window.innerWidth);
+            const y = -5.0 * ((event.clientY - 0.5 * window.innerHeight) / window.innerHeight);
+            target.position.set(x, y, -5);
+        };
+        window.addEventListener('mousemove', handleMouseMove);
+        return () => window.removeEventListener('mousemove', handleMouseMove);
+    }, [target]);
+
+    return null;
+};
+
 // ===== Main Component =====
 
 interface AvatarCanvasProps {
@@ -221,6 +285,8 @@ export const AvatarCanvas: React.FC<AvatarCanvasProps> = ({
     avatarState = "idle",
     emotion = "neutral",
 }) => {
+    const lookAtTargetRef = useRef(new THREE.Object3D());
+
     return (
         <div className="avatar-section">
             <Canvas
@@ -235,7 +301,8 @@ export const AvatarCanvas: React.FC<AvatarCanvasProps> = ({
             >
                 <ambientLight intensity={0.6} />
                 <directionalLight position={[4, 10, 4]} intensity={1.2} />
-                <VrmModel avatarState={avatarState} emotion={emotion} />
+                <VrmModel avatarState={avatarState} emotion={emotion} lookAtTarget={lookAtTargetRef.current} />
+                <MouseTracking target={lookAtTargetRef.current} />
                 <OrbitControls
                     target={[0, 1.0, 0]}
                     enablePan={false}
