@@ -19,7 +19,7 @@ pub struct Message {
 
 pub struct LocalLlmClient {
     backend: LlamaBackend,
-    model_path: String,
+    model: LlamaModel,
 }
 
 impl LocalLlmClient {
@@ -33,16 +33,21 @@ impl LocalLlmClient {
         }
 
         println!("[LLM] Backend initialized (Metal GPU)");
-        println!("[LLM] Model path: {}", model_path);
+        println!("[LLM] Loading model: {} ...", model_path);
 
-        Ok(Self {
-            backend,
-            model_path: model_path.to_string(),
-        })
+        // Load model once with GPU offload
+        let model_params = LlamaModelParams::default().with_n_gpu_layers(1000);
+        let model_params = pin!(model_params);
+
+        let model = LlamaModel::load_from_file(&backend, model_path, &model_params)
+            .map_err(|e| anyhow::anyhow!("Failed to load model: {:?}", e))?;
+
+        println!("[LLM] Model loaded successfully.");
+
+        Ok(Self { backend, model })
     }
 
-    /// Format messages into a prompt string for the model.
-    /// Uses a simple ChatML-like format.
+    /// Format messages into a ChatML prompt string.
     fn format_prompt(messages: &[Message]) -> String {
         let mut prompt = String::new();
         for msg in messages {
@@ -68,27 +73,22 @@ impl LocalLlmClient {
     }
 
     /// Generate a response from the local model.
-    /// This is a blocking operation — call from a thread, not from async directly.
+    /// Blocking — call from spawn_blocking, not directly from async.
     pub fn chat(&self, messages: Vec<Message>) -> Result<String> {
         let prompt = Self::format_prompt(&messages);
 
-        // Load model with GPU offload
-        let model_params = LlamaModelParams::default().with_n_gpu_layers(1000);
-        let model_params = pin!(model_params);
-
-        let model = LlamaModel::load_from_file(&self.backend, &self.model_path, &model_params)
-            .map_err(|e| anyhow::anyhow!("Failed to load model: {:?}", e))?;
-
-        // Create context
+        // Create context (lightweight, reuses loaded model)
         let ctx_params =
             LlamaContextParams::default().with_n_ctx(Some(NonZeroU32::new(4096).unwrap()));
 
-        let mut ctx = model
+        let mut ctx = self
+            .model
             .new_context(&self.backend, ctx_params)
             .map_err(|e| anyhow::anyhow!("Failed to create context: {:?}", e))?;
 
         // Tokenize
-        let tokens = model
+        let tokens = self
+            .model
             .str_to_token(&prompt, AddBos::Always)
             .map_err(|e| anyhow::anyhow!("Failed to tokenize: {:?}", e))?;
 
@@ -122,12 +122,12 @@ impl LocalLlmClient {
             sampler.accept(token);
 
             // Check for end of generation
-            if model.is_eog_token(token) {
+            if self.model.is_eog_token(token) {
                 break;
             }
 
             // Convert token to text
-            match model.token_to_piece(token, &mut decoder, true, None) {
+            match self.model.token_to_piece(token, &mut decoder, true, None) {
                 Ok(piece) => {
                     // Check for end-of-turn marker
                     if piece.contains("<|im_end|>") {
