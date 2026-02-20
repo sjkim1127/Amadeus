@@ -21,19 +21,20 @@ impl Plugin for AvatarPlugin {
     }
 }
 
-fn setup_scene(
-    mut commands: Commands,
-    mut meshes: ResMut<Assets<Mesh>>,
-    mut materials: ResMut<Assets<StandardMaterial>>,
-) {
-    // Camera
+fn setup_scene(mut commands: Commands, asset_server: Res<AssetServer>) {
+    // Camera — framing upper body / head of humanoid
     commands.spawn((Camera3dBundle {
-        transform: Transform::from_xyz(0.0, 1.5, 4.0).looking_at(Vec3::new(0.0, 1.0, 0.0), Vec3::Y),
+        transform: Transform::from_xyz(0.0, 1.2, 2.5).looking_at(Vec3::new(0.0, 1.0, 0.0), Vec3::Y),
         ..default()
     },));
 
     // Light
     commands.spawn(DirectionalLightBundle {
+        directional_light: DirectionalLight {
+            illuminance: 10000.0,
+            shadows_enabled: true,
+            ..default()
+        },
         transform: Transform::from_xyz(4.0, 10.0, 4.0).looking_at(Vec3::ZERO, Vec3::Y),
         ..default()
     });
@@ -41,20 +42,16 @@ fn setup_scene(
     // Ambient Light
     commands.insert_resource(AmbientLight {
         color: Color::WHITE,
-        brightness: 0.5,
+        brightness: 300.0,
     });
 
-    // Avatar Placeholder (Cuboid)
+    // Load VRM model as glTF scene
+    let avatar_scene: Handle<Scene> = asset_server.load("model/vrm/KurisuMakise.vrm#Scene0");
+
     commands.spawn((
-        PbrBundle {
-            mesh: meshes.add(Cuboid::default()),
-            material: materials.add(StandardMaterial {
-                base_color: Color::rgb(0.2, 0.7, 0.9),
-                metallic: 0.5,
-                perceptual_roughness: 0.5,
-                ..default()
-            }),
-            transform: Transform::from_xyz(0.0, 1.0, 0.0).with_scale(Vec3::new(1.0, 2.0, 0.5)),
+        SceneBundle {
+            scene: avatar_scene,
+            transform: Transform::from_xyz(0.0, 0.0, 0.0).with_scale(Vec3::splat(1.0)),
             ..default()
         },
         AvatarComponent,
@@ -66,6 +63,6 @@ struct AvatarComponent;
 
 fn rotate_avatar(time: Res<Time>, mut query: Query<&mut Transform, With<AvatarComponent>>) {
     for mut transform in &mut query {
-        transform.rotate_y(0.5 * time.delta_seconds());
+        transform.rotate_y(0.3 * time.delta_seconds());
     }
 }
