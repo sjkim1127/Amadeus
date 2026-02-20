@@ -69,7 +69,7 @@ fn setup_scene(mut commands: Commands, asset_server: Res<AssetServer>) {
 #[derive(Component)]
 struct AvatarComponent;
 
-// Procedural idle animation (A-pose and slight breathing)
+// Procedural idle animation (slight breathing)
 fn animate_idle_pose(time: Res<Time>, mut bones: Query<(&Name, &mut Transform)>) {
     let t = time.elapsed_seconds();
     let breathe = (t * 2.0).sin() * 0.01; // subtle breathing scale
@@ -77,25 +77,12 @@ fn animate_idle_pose(time: Res<Time>, mut bones: Query<(&Name, &mut Transform)>)
     for (name, mut transform) in &mut bones {
         let n = name.as_str();
 
-        // Put arms down to A-pose from T-pose
         match n {
-            "J_Bip_L_UpperArm" | "LeftArm" => {
-                transform.rotation = Quat::from_euler(EulerRot::XYZ, 0.0, 0.0, 1.25);
-            }
-            "J_Bip_R_UpperArm" | "RightArm" => {
-                transform.rotation = Quat::from_euler(EulerRot::XYZ, 0.0, 0.0, -1.25);
-            }
-            "J_Bip_L_LowerArm" | "LeftForeArm" => {
-                transform.rotation = Quat::from_euler(EulerRot::XYZ, 0.2, 0.0, 0.2);
-            }
-            "J_Bip_R_LowerArm" | "RightForeArm" => {
-                transform.rotation = Quat::from_euler(EulerRot::XYZ, 0.2, 0.0, -0.2);
-            }
             "J_Bip_C_Chest" | "Chest" | "Spine1" => {
                 // Breathing: slightly scale the chest
                 transform.scale = Vec3::new(1.0 + breathe, 1.0 + breathe, 1.0 + breathe * 1.5);
             }
-            _ => Default::default(),
+            _ => {}
         };
     }
 }
