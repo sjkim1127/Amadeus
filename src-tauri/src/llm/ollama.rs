@@ -119,20 +119,32 @@ impl OllamaClient {
 
         let stream = res.bytes_stream();
 
-        let parsed_stream = stream.map(|chunk_result| match chunk_result {
+        let mut buffer = String::new();
+
+        let parsed_stream = stream.map(move |chunk_result| match chunk_result {
             Ok(chunk) => {
-                let text = String::from_utf8_lossy(&chunk).to_string();
+                let text = String::from_utf8_lossy(&chunk);
+                buffer.push_str(&text);
+
                 let mut output = String::new();
-                for line in text.lines() {
-                    if line.trim().is_empty() {
+
+                // Extract and process complete lines
+                while let Some(index) = buffer.find('\n') {
+                    let line = buffer[..index].to_string();
+                    buffer.drain(..=index);
+
+                    let trimmed = line.trim();
+                    if trimmed.is_empty() {
                         continue;
                     }
-                    if let Ok(response) = serde_json::from_str::<ChatResponse>(line) {
+
+                    if let Ok(response) = serde_json::from_str::<ChatResponse>(trimmed) {
                         if let Some(msg) = response.message {
                             output.push_str(&msg.content);
                         }
                     }
                 }
+
                 Ok(output)
             }
             Err(e) => Err(anyhow::anyhow!("Stream error: {}", e)),

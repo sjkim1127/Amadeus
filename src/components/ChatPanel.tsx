@@ -1,4 +1,7 @@
 import React, { useState, useRef, useEffect } from "react";
+import ReactMarkdown from "react-markdown";
+import rehypeHighlight from "rehype-highlight";
+import "highlight.js/styles/github-dark.css";
 import { ChatMessage, ChatStatus } from "../hooks/useChat";
 
 interface ChatPanelProps {
@@ -47,78 +50,6 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({
             e.preventDefault();
             handleSend();
         }
-    };
-
-    const renderMarkdown = (text: string) => {
-        // Simple markdown: **bold**, `code`, ```code blocks```, bullet lists
-        const lines = text.split("\n");
-        const elements: React.ReactNode[] = [];
-        let inCodeBlock = false;
-        let codeContent: string[] = [];
-        let codeLang = "";
-
-        lines.forEach((line, i) => {
-            if (line.startsWith("```")) {
-                if (inCodeBlock) {
-                    elements.push(
-                        <pre key={`code-${i}`} className="code-block">
-                            <code>{codeContent.join("\n")}</code>
-                        </pre>
-                    );
-                    codeContent = [];
-                    inCodeBlock = false;
-                } else {
-                    codeLang = line.slice(3).trim();
-                    inCodeBlock = true;
-                }
-                return;
-            }
-
-            if (inCodeBlock) {
-                codeContent.push(line);
-                return;
-            }
-
-            if (line.startsWith("- ") || line.startsWith("* ")) {
-                elements.push(
-                    <div key={i} className="bullet-item">
-                        <span className="bullet">•</span>
-                        <span
-                            dangerouslySetInnerHTML={{
-                                __html: renderInline(line.slice(2)),
-                            }}
-                        />
-                    </div>
-                );
-            } else if (line.trim() === "") {
-                elements.push(<div key={i} className="spacer" />);
-            } else {
-                elements.push(
-                    <p
-                        key={i}
-                        className="text-line"
-                        dangerouslySetInnerHTML={{ __html: renderInline(line) }}
-                    />
-                );
-            }
-        });
-
-        // Unclosed code block
-        if (inCodeBlock && codeContent.length > 0) {
-            elements.push(
-                <pre key="code-end" className="code-block">
-                    <code>{codeContent.join("\n")}</code>
-                </pre>
-            );
-        }
-
-        return elements;
-    };
-
-    const renderInline = (text: string): string => {
-        return text
-            .replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')
-            .replace(/`(.*?)`/g, '<code class="inline-code">$1</code>');
     };
 
     return (
@@ -179,9 +110,13 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({
                             )}
                         </div>
                         <div className="message-content">
-                            {msg.role === "assistant"
-                                ? renderMarkdown(msg.content)
-                                : msg.content}
+                            {msg.role === "assistant" ? (
+                                <ReactMarkdown rehypePlugins={[rehypeHighlight]}>
+                                    {msg.content}
+                                </ReactMarkdown>
+                            ) : (
+                                msg.content
+                            )}
                         </div>
                     </div>
                 ))}

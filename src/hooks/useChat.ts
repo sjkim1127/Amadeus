@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useRef } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { listen, UnlistenFn } from "@tauri-apps/api/event";
 import type { AvatarState, AvatarEmotion } from "../components/AvatarCanvas";
@@ -63,11 +63,13 @@ export function useChat() {
     });
     const [avatarState, setAvatarState] = useState<AvatarState>("idle");
     const [emotion, setEmotion] = useState<AvatarEmotion>("neutral");
-    const unlistenRefs = useRef<UnlistenFn[]>([]);
-
     useEffect(() => {
+        let isMounted = true;
+        let unlistenMsg: UnlistenFn | undefined;
+        let unlistenStatus: UnlistenFn | undefined;
+
         const setupListeners = async () => {
-            const unlistenMsg = await listen<{ role: string; content: string }>(
+            const msgPromise = listen<{ role: string; content: string }>(
                 "chat-message",
                 (event) => {
                     setMessages((prev) => [
@@ -76,10 +78,7 @@ export function useChat() {
                     ]);
 
                     if (event.payload.role === "assistant") {
-                        // Detect emotion from response
                         setEmotion(detectEmotion(event.payload.content));
-
-                        // Speaking animation for a duration based on content length
                         setAvatarState("speaking");
                         const speakDuration = Math.min(
                             Math.max(event.payload.content.length * 50, 2000),
@@ -87,7 +86,6 @@ export function useChat() {
                         );
                         setTimeout(() => {
                             setAvatarState("idle");
-                            // Reset emotion after a delay
                             setTimeout(() => setEmotion("neutral"), 3000);
                         }, speakDuration);
                     }
@@ -98,7 +96,7 @@ export function useChat() {
                 }
             );
 
-            const unlistenStatus = await listen<{
+            const statusPromise = listen<{
                 status: string;
                 is_thinking: boolean;
             }>("chat-status", (event) => {
@@ -107,19 +105,28 @@ export function useChat() {
                     isThinking: event.payload.is_thinking,
                 });
 
-                // Map status to avatar state
                 if (event.payload.is_thinking) {
                     setAvatarState("thinking");
                 }
             });
 
-            unlistenRefs.current = [unlistenMsg, unlistenStatus];
+            // Wait for both listeners to be registered
+            unlistenMsg = await msgPromise;
+            unlistenStatus = await statusPromise;
+
+            // If component unmounted while we were waiting, cleanup immediately
+            if (!isMounted) {
+                if (unlistenMsg) unlistenMsg();
+                if (unlistenStatus) unlistenStatus();
+            }
         };
 
         setupListeners();
 
         return () => {
-            unlistenRefs.current.forEach((unlisten) => unlisten());
+            isMounted = false;
+            if (unlistenMsg) unlistenMsg();
+            if (unlistenStatus) unlistenStatus();
         };
     }, []);
 

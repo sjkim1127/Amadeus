@@ -106,7 +106,7 @@ const VrmModel: React.FC<VrmModelProps> = ({ avatarState, emotion }) => {
                     currentActionRef.current = actionsRef.current['idle'];
                 }
             },
-            (progress) => { },
+            () => { },
             (error) => {
                 console.error("[VRM] Failed to load:", error);
             }
