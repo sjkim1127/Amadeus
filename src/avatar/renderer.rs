@@ -4,7 +4,7 @@ pub struct AvatarPlugin;
 
 impl Plugin for AvatarPlugin {
     fn build(&self, app: &mut App) {
-        app.add_plugins((DefaultPlugins.set(WindowPlugin {
+        app.add_plugins(DefaultPlugins.set(WindowPlugin {
             primary_window: Some(Window {
                 title: "Amadeus Avatar".into(),
                 transparent: true,
@@ -14,17 +14,20 @@ impl Plugin for AvatarPlugin {
                 ..default()
             }),
             ..default()
-        }),))
-            // Replaced Color::NONE with a sleek dark aesthetic background because transparent windows often render black.
-            .insert_resource(ClearColor(Color::rgb(0.08, 0.08, 0.1)))
-            .add_systems(Startup, setup_scene)
-            .add_systems(Update, animate_idle_pose);
+        }))
+        .insert_resource(ClearColor(Color::NONE))
+        .add_systems(Startup, setup_scene)
+        .add_systems(Update, animate_idle_pose);
     }
 }
 
 fn setup_scene(mut commands: Commands, asset_server: Res<AssetServer>) {
     // Camera — framing upper body / head of humanoid
     commands.spawn((Camera3dBundle {
+        camera: Camera {
+            clear_color: ClearColorConfig::None,
+            ..default()
+        },
         transform: Transform::from_xyz(0.0, 1.2, 2.5).looking_at(Vec3::new(0.0, 1.0, 0.0), Vec3::Y),
         ..default()
     },));
