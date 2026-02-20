@@ -72,12 +72,14 @@ impl LocalLlmClient {
         prompt
     }
 
-    /// Generate a response from the local model.
-    /// Blocking — call from spawn_blocking, not directly from async.
-    pub fn chat(&self, messages: Vec<Message>) -> Result<String> {
+    /// Generate a response with real-time per-token callback.
+    /// `on_token` is called for each generated text piece — use this for streaming to UI.
+    pub fn chat_streaming<F>(&self, messages: Vec<Message>, on_token: F) -> Result<String>
+    where
+        F: Fn(&str),
+    {
         let prompt = Self::format_prompt(&messages);
 
-        // Create context (lightweight, reuses loaded model)
         let ctx_params =
             LlamaContextParams::default().with_n_ctx(Some(NonZeroU32::new(4096).unwrap()));
 
@@ -86,13 +88,11 @@ impl LocalLlmClient {
             .new_context(&self.backend, ctx_params)
             .map_err(|e| anyhow::anyhow!("Failed to create context: {:?}", e))?;
 
-        // Tokenize
         let tokens = self
             .model
             .str_to_token(&prompt, AddBos::Always)
             .map_err(|e| anyhow::anyhow!("Failed to tokenize: {:?}", e))?;
 
-        // Create batch and add prompt tokens
         let mut batch = LlamaBatch::new(4096, 1);
 
         let last_index = (tokens.len() - 1) as i32;
@@ -103,14 +103,12 @@ impl LocalLlmClient {
                 .context("Failed to add token to batch")?;
         }
 
-        // Decode prompt
         ctx.decode(&mut batch)
             .map_err(|e| anyhow::anyhow!("Failed to decode prompt: {:?}", e))?;
 
-        // Generate tokens
         let mut output = String::new();
         let mut n_cur = batch.n_tokens();
-        let n_len = n_cur + 2048; // Max generation length
+        let n_len = n_cur + 2048;
 
         let mut decoder = encoding_rs::UTF_8.new_decoder();
 
@@ -121,20 +119,17 @@ impl LocalLlmClient {
             let token = sampler.sample(&ctx, batch.n_tokens() - 1);
             sampler.accept(token);
 
-            // Check for end of generation
             if self.model.is_eog_token(token) {
                 break;
             }
 
-            // Convert token to text
             match self.model.token_to_piece(token, &mut decoder, true, None) {
                 Ok(piece) => {
-                    // Check for end-of-turn marker
                     if piece.contains("<|im_end|>") {
                         break;
                     }
-                    print!("{}", piece);
-                    std::io::Write::flush(&mut std::io::stdout()).ok();
+                    // Fire callback for streaming
+                    on_token(&piece);
                     output.push_str(&piece);
                 }
                 Err(_) => break,
@@ -151,7 +146,14 @@ impl LocalLlmClient {
                 .map_err(|e| anyhow::anyhow!("Failed to decode: {:?}", e))?;
         }
 
-        println!(); // Newline after generation
         Ok(output)
+    }
+
+    /// Non-streaming convenience wrapper (prints to stdout).
+    pub fn chat(&self, messages: Vec<Message>) -> Result<String> {
+        self.chat_streaming(messages, |piece| {
+            print!("{}", piece);
+            std::io::Write::flush(&mut std::io::stdout()).ok();
+        })
     }
 }

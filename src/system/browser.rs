@@ -1,4 +1,3 @@
-use anyhow::Result;
 use chromiumoxide::browser::{Browser, BrowserConfig};
 use futures_util::StreamExt;
 use serde_json::{json, Value};

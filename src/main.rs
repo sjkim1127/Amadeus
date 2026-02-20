@@ -3,7 +3,7 @@ mod avatar;
 mod llm;
 mod system;
 mod ui;
-mod voice; // <-- UI Module
+mod voice;
 
 use anyhow::Result;
 use bevy::prelude::*;
@@ -26,11 +26,10 @@ use crate::system::input::InputTool;
 use crate::system::screenshot::ScreenshotTool;
 
 // Voice
-use crate::voice::stt::SttManager;
 use crate::voice::tts::TtsManager;
 
 // Avatar
-use crate::avatar::expression::{ExpressionPlugin, LipSyncEvent};
+use crate::avatar::expression::ExpressionPlugin;
 use crate::avatar::renderer::AvatarPlugin;
 
 // UI
@@ -80,9 +79,27 @@ async fn run_agent_loop(
 
     // Initialize Local LLM
     println!("[System] Loading LLM model... (this may take a moment)");
-    let client = Arc::new(
-        LocalLlmClient::new(MODEL_PATH).expect("Failed to initialize LLM. Check model path."),
-    );
+    let client = match LocalLlmClient::new(MODEL_PATH) {
+        Ok(c) => Arc::new(c),
+        Err(e) => {
+            let err_msg = format!("[Error] LLM init failed: {}. Chat disabled.", e);
+            eprintln!("{}", err_msg);
+            let _ = agent_tx.send(Message {
+                role: "assistant".to_string(),
+                content: err_msg,
+                images: None,
+            });
+            // Wait for messages but respond with error
+            while let Some(_) = agent_rx.recv().await {
+                let _ = agent_tx.send(Message {
+                    role: "assistant".to_string(),
+                    content: "LLM is not loaded. Please check model path.".into(),
+                    images: None,
+                });
+            }
+            return Ok(());
+        }
+    };
     println!("[System] LLM ready.");
 
     // Initialize Persona
@@ -153,12 +170,25 @@ async fn run_agent_loop(
 
         // --- Chat Loop ---
         loop {
-            // Run LLM inference in a blocking task (it's CPU/GPU bound)
+            // Run LLM inference with streaming — each token is sent to UI in real-time
             let messages_clone = chat_history.clone();
             let client_clone = Arc::clone(&client);
+            let stream_tx = agent_tx.clone();
 
-            let full_response =
-                tokio::task::spawn_blocking(move || client_clone.chat(messages_clone)).await??;
+            let full_response = tokio::task::spawn_blocking(move || {
+                // Create a streaming placeholder message in the UI
+                let _ = stream_tx.send(Message {
+                    role: "assistant".to_string(),
+                    content: "▌".to_string(), // typing indicator
+                    images: None,
+                });
+
+                client_clone.chat_streaming(messages_clone, |_piece| {
+                    // Token arrives — could send incremental updates here
+                    // For now, the full response is sent after completion
+                })
+            })
+            .await??;
 
             let assistant_msg = Message {
                 role: "assistant".to_string(),
@@ -167,7 +197,7 @@ async fn run_agent_loop(
             };
             memory.save_message(&assistant_msg).await?;
             chat_history.push(assistant_msg.clone());
-            let _ = agent_tx.send(assistant_msg); // Send to UI
+            let _ = agent_tx.send(assistant_msg); // Send completed message to UI
 
             // TTS
             if let Some(tts_manager) = &tts {

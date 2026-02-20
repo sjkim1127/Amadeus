@@ -1,4 +1,3 @@
-use anyhow::Result;
 use base64::{engine::general_purpose, Engine as _};
 use image::{DynamicImage, ImageFormat};
 use serde_json::{json, Value};

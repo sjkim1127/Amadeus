@@ -8,3 +8,9 @@ models/
 *.gguf
 *.bin
 *.ggml
+
+# Database files (conversation history - personal data)
+*.db
+
+# Config (may contain user-specific paths)
+config.toml

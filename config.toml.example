@@ -1,0 +1,26 @@
+# Amadeus Configuration File
+# Copy this to config.toml and adjust paths for your setup.
+
+[llm]
+model_path = "model/localllm/qwen2.5-7b-instruct-q4_k_m.gguf"
+max_tokens = 2048
+n_ctx = 4096
+n_gpu_layers = 1000
+
+[stt]
+model_path = "models/ggml-base.en.bin"
+record_seconds = 5
+
+[tts]
+# "system" uses OS native TTS (macOS 'say', etc.)
+# "disabled" turns off voice output
+engine = "system"
+
+[avatar]
+vrm_path = "model/vrm/KurisuMakise.vrm"
+window_width = 400
+window_height = 600
+
+[security]
+# Restrict file system tool access to these directories only
+allowed_paths = ["./workspace", "./documents"]

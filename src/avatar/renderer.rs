@@ -1,6 +1,6 @@
 use bevy::prelude::*;
 use bevy_vrm::mtoon::MtoonSun;
-use bevy_vrm::{VrmInstance, VrmPlugins};
+use bevy_vrm::{VrmBundle, VrmPlugin};
 
 pub struct AvatarPlugin;
 
@@ -17,9 +17,8 @@ impl Plugin for AvatarPlugin {
             }),
             ..default()
         }))
-        // VrmPlugins supports actual .vrm files and SpringBones physics
-        .add_plugins(VrmPlugins)
-        // Transparent background to act like a floating desktop widget (Tauri style)
+        // VrmPlugin supports actual .vrm files with SpringBone physics
+        .add_plugins(VrmPlugin)
         .insert_resource(ClearColor(Color::NONE))
         .add_systems(Startup, setup_scene)
         .add_systems(Update, animate_idle_pose);
@@ -27,7 +26,7 @@ impl Plugin for AvatarPlugin {
 }
 
 fn setup_scene(mut commands: Commands, asset_server: Res<AssetServer>) {
-    // Camera — framing upper body / head of humanoid
+    // Camera
     commands.spawn((Camera3dBundle {
         camera: Camera {
             clear_color: ClearColorConfig::None,
@@ -37,7 +36,7 @@ fn setup_scene(mut commands: Commands, asset_server: Res<AssetServer>) {
         ..default()
     },));
 
-    // Light with MtoonSun marker for proper VRM shading
+    // Light with MtoonSun marker for proper VRM MToon shading
     commands.spawn((
         DirectionalLightBundle {
             directional_light: DirectionalLight {
@@ -57,16 +56,18 @@ fn setup_scene(mut commands: Commands, asset_server: Res<AssetServer>) {
         brightness: 300.0,
     });
 
-    // Load actual VRM file using VrmInstance
+    // Load VRM using VrmBundle (v0.0.9 API with SpringBones support)
     commands.spawn((
-        Transform::from_xyz(0.0, -0.2, 0.0)
-            .with_rotation(Quat::from_rotation_y(std::f32::consts::PI))
-            .with_scale(Vec3::splat(1.0)),
-        GlobalTransform::default(),
-        Visibility::default(),
-        InheritedVisibility::default(),
-        ViewVisibility::default(),
-        VrmInstance(asset_server.load("model/vrm/KurisuMakise.vrm")),
+        VrmBundle {
+            vrm: asset_server.load("model/vrm/KurisuMakise.vrm"),
+            scene_bundle: SceneBundle {
+                transform: Transform::from_xyz(0.0, -0.2, 0.0)
+                    .with_rotation(Quat::from_rotation_y(std::f32::consts::PI))
+                    .with_scale(Vec3::splat(1.0)),
+                ..default()
+            },
+            ..default()
+        },
         AvatarComponent,
     ));
 }
