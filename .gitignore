@@ -14,3 +14,15 @@ models/
 
 # Config (may contain user-specific paths)
 config.toml
+
+# Vendor directory
+vendor/
+
+# Node modules
+node_modules/
+
+# Vite build output
+dist/
+
+# Tauri build
+src-tauri/target/

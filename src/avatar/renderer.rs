@@ -6,41 +6,23 @@ pub struct AvatarPlugin;
 
 impl Plugin for AvatarPlugin {
     fn build(&self, app: &mut App) {
-        use bevy::render::{
-            settings::{RenderCreation, WgpuLimits, WgpuSettings},
-            RenderPlugin,
-        };
-
-        app.add_plugins(
-            DefaultPlugins
-                .set(WindowPlugin {
-                    primary_window: Some(Window {
-                        title: "Amadeus Avatar".into(),
-                        transparent: true,
-                        decorations: false,
-                        window_level: bevy::window::WindowLevel::AlwaysOnTop,
-                        resolution: (400., 600.).into(),
-                        ..default()
-                    }),
-                    ..default()
-                })
-                .set(RenderPlugin {
-                    render_creation: RenderCreation::Automatic(WgpuSettings {
-                        limits: WgpuLimits {
-                            // Increase limit for MToon shader / VRM bones on macOS Metal
-                            max_dynamic_uniform_buffers_per_pipeline_layout: 10,
-                            ..default()
-                        },
-                        ..default()
-                    }),
-                    ..default()
-                }),
-        )
-        // VrmPlugin supports actual .vrm files with SpringBone physics
+        app.add_plugins(DefaultPlugins.set(WindowPlugin {
+            primary_window: Some(Window {
+                title: "Amadeus Avatar".into(),
+                transparent: true,
+                decorations: false,
+                window_level: bevy::window::WindowLevel::AlwaysOnTop,
+                resolution: (400., 600.).into(),
+                ..default()
+            }),
+            ..default()
+        }))
+        // // VrmPlugin supports actual .vrm files with SpringBone physics
         .add_plugins(VrmPlugin)
         .insert_resource(ClearColor(Color::NONE))
         .add_systems(Startup, setup_scene)
-        .add_systems(Update, animate_idle_pose);
+        // .add_systems(Update, animate_idle_pose);
+        ;
     }
 }
 
@@ -60,7 +42,7 @@ fn setup_scene(mut commands: Commands, asset_server: Res<AssetServer>) {
         DirectionalLightBundle {
             directional_light: DirectionalLight {
                 illuminance: 10000.0,
-                shadows_enabled: true,
+                shadows_enabled: false,
                 ..default()
             },
             transform: Transform::from_xyz(4.0, 10.0, 4.0).looking_at(Vec3::ZERO, Vec3::Y),
@@ -76,19 +58,19 @@ fn setup_scene(mut commands: Commands, asset_server: Res<AssetServer>) {
     });
 
     // Load VRM using VrmBundle (v0.0.9 API with SpringBones support)
-    commands.spawn((
-        VrmBundle {
-            vrm: asset_server.load("model/vrm/KurisuMakise.vrm"),
-            scene_bundle: SceneBundle {
-                transform: Transform::from_xyz(0.0, -0.2, 0.0)
-                    .with_rotation(Quat::from_rotation_y(std::f32::consts::PI))
-                    .with_scale(Vec3::splat(1.0)),
-                ..default()
-            },
-            ..default()
-        },
-        AvatarComponent,
-    ));
+    // commands.spawn((
+    //     VrmBundle {
+    //         vrm: asset_server.load("model/vrm/KurisuMakise.vrm"),
+    //         scene_bundle: SceneBundle {
+    //             transform: Transform::from_xyz(0.0, -0.2, 0.0)
+    //                 .with_rotation(Quat::from_rotation_y(std::f32::consts::PI))
+    //                 .with_scale(Vec3::splat(1.0)),
+    //             ..default()
+    //         },
+    //         ..default()
+    //     },
+    //     AvatarComponent,
+    // ));
 }
 
 #[derive(Component)]

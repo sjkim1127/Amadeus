@@ -37,7 +37,21 @@ rubato = "0.16.1"
 # tts removed (using 'say' command)
 
 # Phase 4 dependencies
-bevy = { version = "0.13.2", features = ["dynamic_linking"] }
+bevy = { version = "0.13.2", default-features = false, features = [
+    "dynamic_linking",
+    "bevy_asset",
+    "bevy_winit",
+    "bevy_render",
+    "bevy_core_pipeline",
+    "bevy_pbr",
+    "bevy_gltf",
+    "bevy_animation",
+    "bevy_gilrs",
+    "tonemapping_luts",
+    "x11",
+    "png",
+    "zstd"
+] }
 bevy_vrm = "0.0.9"
 bevy_egui = "0.25"
 
