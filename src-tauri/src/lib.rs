@@ -21,7 +21,7 @@ use crate::system::screenshot::ScreenshotTool;
 
 use crate::voice::tts::TtsManager;
 
-const OLLAMA_MODEL: &str = "qwen2.5-coder:14b";
+const OLLAMA_MODEL: &str = "amadeus-qwen3";
 
 // ===== Tauri State =====
 
