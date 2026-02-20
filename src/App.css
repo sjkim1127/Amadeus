@@ -63,10 +63,26 @@ body {
 }
 
 .chat-section {
-  flex: 1;
+  flex: 3;
   display: flex;
   flex-direction: column;
   min-width: 0;
+}
+
+.avatar-wrapper {
+  flex: 2;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.avatar-section {
+  flex: 1;
+  background: linear-gradient(180deg, #0d0d16 0%, #12121e 50%, #0a0a14 100%);
+  border-radius: var(--radius);
+  border: 1px solid var(--border);
+  overflow: hidden;
+  box-shadow: var(--shadow);
 }
 
 /* ===== Chat Panel ===== */
@@ -177,8 +193,15 @@ body {
 }
 
 @keyframes slideDown {
-  from { opacity: 0; transform: translateY(-8px); }
-  to { opacity: 1; transform: translateY(0); }
+  from {
+    opacity: 0;
+    transform: translateY(-8px);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
 }
 
 /* ===== Messages ===== */
@@ -213,8 +236,15 @@ body {
 }
 
 @keyframes fadeIn {
-  from { opacity: 0; transform: translateY(4px); }
-  to { opacity: 1; transform: translateY(0); }
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
 }
 
 .message-header {
@@ -325,15 +355,27 @@ body {
   animation: bounce 1.4s infinite ease-in-out both;
 }
 
-.typing-indicator .dot:nth-child(1) { animation-delay: -0.32s; }
-.typing-indicator .dot:nth-child(2) { animation-delay: -0.16s; }
-.typing-indicator .dot:nth-child(3) { animation-delay: 0s; }
+.typing-indicator .dot:nth-child(1) {
+  animation-delay: -0.32s;
+}
+
+.typing-indicator .dot:nth-child(2) {
+  animation-delay: -0.16s;
+}
+
+.typing-indicator .dot:nth-child(3) {
+  animation-delay: 0s;
+}
 
 @keyframes bounce {
-  0%, 80%, 100% {
+
+  0%,
+  80%,
+  100% {
     transform: scale(0);
     opacity: 0.4;
   }
+
   40% {
     transform: scale(1);
     opacity: 1;
