@@ -2,13 +2,15 @@ mod agent;
 mod avatar;
 mod llm;
 mod system;
-mod voice;
+mod ui;
+mod voice; // <-- UI Module
 
 use anyhow::Result;
 use bevy::prelude::*;
-use std::io::{self, Write};
 use std::sync::Arc;
+use std::sync::Mutex;
 use std::thread;
+use tokio::sync::mpsc;
 use tracing::Level;
 use tracing_subscriber::FmtSubscriber;
 
@@ -28,17 +30,23 @@ use crate::voice::stt::SttManager;
 use crate::voice::tts::TtsManager;
 
 // Avatar
-use crate::avatar::expression::ExpressionPlugin;
+use crate::avatar::expression::{ExpressionPlugin, LipSyncEvent};
 use crate::avatar::renderer::AvatarPlugin;
 
-const MODEL_PATH: &str = "model/localllm/Huihui-Qwen3-VL-32B-Instruct-abliterated.Q4_K_M.gguf";
+// UI
+use crate::ui::{ChatChannel, UiPlugin};
+
+const MODEL_PATH: &str = "model/localllm/qwen2.5-7b-instruct-q4_k_m.gguf";
 
 fn main() {
+    let (ui_tx, agent_rx) = mpsc::unbounded_channel::<String>();
+    let (agent_tx, ui_rx) = mpsc::unbounded_channel::<Message>();
+
     // 1. Spawn Agent Core in background thread
     thread::spawn(move || {
         let rt = tokio::runtime::Runtime::new().expect("Failed to create runtime");
         rt.block_on(async {
-            if let Err(e) = run_agent_loop().await {
+            if let Err(e) = run_agent_loop(agent_rx, agent_tx).await {
                 eprintln!("Agent Loop Error: {}", e);
             }
         });
@@ -48,10 +56,18 @@ fn main() {
     App::new()
         .add_plugins(AvatarPlugin)
         .add_plugins(ExpressionPlugin)
+        .add_plugins(UiPlugin)
+        .insert_resource(ChatChannel {
+            tx: ui_tx,
+            rx: Mutex::new(ui_rx),
+        })
         .run();
 }
 
-async fn run_agent_loop() -> Result<()> {
+async fn run_agent_loop(
+    mut agent_rx: mpsc::UnboundedReceiver<String>,
+    agent_tx: mpsc::UnboundedSender<Message>,
+) -> Result<()> {
     let subscriber = FmtSubscriber::builder()
         .with_max_level(Level::ERROR)
         .finish();
@@ -79,15 +95,7 @@ async fn run_agent_loop() -> Result<()> {
     dispatcher.register(Box::new(FileSystemTool));
     dispatcher.register(Box::new(BrowserTool));
 
-    // Initialize Voice
-    let stt = match SttManager::new("models/ggml-base.en.bin") {
-        Ok(s) => Some(s),
-        Err(e) => {
-            println!("Voice Input Unavailable: {}", e);
-            None
-        }
-    };
-
+    // Voice (We can ignore STT for UI text-only, but keeping it logic-wise if we want to restore stdin later)
     let tts = match TtsManager::new() {
         Ok(t) => Some(t),
         Err(e) => {
@@ -99,7 +107,6 @@ async fn run_agent_loop() -> Result<()> {
     // Load History
     let mut chat_history: Vec<Message> = memory.get_recent_history(50).await?;
 
-    // System Prompt
     let tools_schema = dispatcher.get_tools_schema();
     let tools_prompt = format!(
         "\nYou have access to the following tools: {}\n\nTo use a tool, respond with a JSON object in this format ONLY:\n{{ \"tool\": \"tool_name\", \"args\": {{ ... }} }}\nIf you use a tool, do not write anything else.",
@@ -117,44 +124,21 @@ async fn run_agent_loop() -> Result<()> {
         chat_history.push(sys_msg);
     }
 
-    println!("Amadeus ({}) is ready.", persona.name);
-    println!("Type 'listen' to record voice (if available).");
+    println!(
+        "Amadeus ({}) is ready. (Awaiting UI Input...)",
+        persona.name
+    );
 
-    loop {
-        print!("> ");
-        io::stdout().flush()?;
+    // Initial greeting via UI
+    let greeting = Message {
+        role: "assistant".to_string(),
+        content: "System online. Waiting for input...".into(),
+        images: None,
+    };
+    let _ = agent_tx.send(greeting);
 
-        let mut input = String::new();
-        io::stdin().read_line(&mut input)?;
-        let mut input = input.trim().to_string();
-
-        if input.eq_ignore_ascii_case("exit") || input.eq_ignore_ascii_case("quit") {
-            std::process::exit(0);
-        }
-
-        // Voice Command Trigger
-        if input.eq_ignore_ascii_case("listen") {
-            if let Some(stt_manager) = &stt {
-                println!("Recording for 5 seconds...");
-                match stt_manager.listen_once(5).await {
-                    Ok(text) => {
-                        println!("Heard: {}", text);
-                        if text.trim().is_empty() {
-                            continue;
-                        }
-                        input = text;
-                    }
-                    Err(e) => {
-                        println!("STT Error: {}", e);
-                        continue;
-                    }
-                }
-            } else {
-                println!("Voice input not configured.");
-                continue;
-            }
-        }
-
+    while let Some(mut input) = agent_rx.recv().await {
+        input = input.trim().to_string();
         if input.is_empty() {
             continue;
         }
@@ -182,11 +166,14 @@ async fn run_agent_loop() -> Result<()> {
                 images: None,
             };
             memory.save_message(&assistant_msg).await?;
-            chat_history.push(assistant_msg);
+            chat_history.push(assistant_msg.clone());
+            let _ = agent_tx.send(assistant_msg); // Send to UI
 
             // TTS
             if let Some(tts_manager) = &tts {
                 if !full_response.trim().starts_with('{') {
+                    // Start lipsync if we had event trigger.
+                    // To do it cleanly we'd need Bevy events handle back to the main thread.
                     let _ = tts_manager.speak(&full_response);
                 }
             }
@@ -204,7 +191,6 @@ async fn run_agent_loop() -> Result<()> {
 
                     match dispatcher.execute(tool_name, args.clone()).await {
                         Ok(result) => {
-                            println!("[System] Tool Output: {}", result);
                             let result_msg = Message {
                                 role: "user".to_string(),
                                 content: format!("Tool Output: {}", result),
@@ -215,7 +201,6 @@ async fn run_agent_loop() -> Result<()> {
                             continue;
                         }
                         Err(e) => {
-                            println!("[System] Tool Error: {}", e);
                             let error_msg = Message {
                                 role: "user".to_string(),
                                 content: format!("Tool Error: {}", e),
@@ -231,4 +216,5 @@ async fn run_agent_loop() -> Result<()> {
             break;
         }
     }
+    Ok(())
 }

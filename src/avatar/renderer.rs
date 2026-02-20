@@ -15,7 +15,8 @@ impl Plugin for AvatarPlugin {
             }),
             ..default()
         }),))
-            .insert_resource(ClearColor(Color::NONE))
+            // Replaced Color::NONE with a sleek dark aesthetic background because transparent windows often render black.
+            .insert_resource(ClearColor(Color::rgb(0.08, 0.08, 0.1)))
             .add_systems(Startup, setup_scene)
             .add_systems(Update, animate_idle_pose);
     }
