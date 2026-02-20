@@ -289,7 +289,7 @@ pub fn run() {
             app.manage(state);
 
             let app_handle = app.handle().clone();
-            tokio::spawn(async move {
+            tauri::async_runtime::spawn(async move {
                 if let Err(e) = run_agent_loop(app_handle, rx).await {
                     eprintln!("Agent Loop Error: {}", e);
                 }
