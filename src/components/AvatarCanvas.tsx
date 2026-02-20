@@ -48,6 +48,38 @@ const VrmModel: React.FC<VrmModelProps> = ({ avatarState, emotion }) => {
                 const vrmData = gltf.userData.vrm as VRM;
                 if (vrmData) {
                     vrmData.scene.rotation.y = Math.PI;
+
+                    // Set natural rest pose (override T-pose)
+                    const h = vrmData.humanoid;
+                    if (h) {
+                        // Arms down naturally
+                        const lUpperArm = h.getNormalizedBoneNode("leftUpperArm");
+                        const rUpperArm = h.getNormalizedBoneNode("rightUpperArm");
+                        const lLowerArm = h.getNormalizedBoneNode("leftLowerArm");
+                        const rLowerArm = h.getNormalizedBoneNode("rightLowerArm");
+                        const lHand = h.getNormalizedBoneNode("leftHand");
+                        const rHand = h.getNormalizedBoneNode("rightHand");
+
+                        if (lUpperArm) {
+                            lUpperArm.rotation.z = 1.2;  // Arm down
+                            lUpperArm.rotation.x = 0.1;  // Slightly forward
+                        }
+                        if (rUpperArm) {
+                            rUpperArm.rotation.z = -1.2;
+                            rUpperArm.rotation.x = 0.1;
+                        }
+                        if (lLowerArm) {
+                            lLowerArm.rotation.z = 0.15; // Slight bend
+                            lLowerArm.rotation.y = 0.0;
+                        }
+                        if (rLowerArm) {
+                            rLowerArm.rotation.z = -0.15;
+                            rLowerArm.rotation.y = 0.0;
+                        }
+                        if (lHand) lHand.rotation.z = 0.1;
+                        if (rHand) rHand.rotation.z = -0.1;
+                    }
+
                     scene.add(vrmData.scene);
                     setVrm(vrmData);
                     console.log("[VRM] Model loaded:", vrmData);
