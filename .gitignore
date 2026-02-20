@@ -1,0 +1,10 @@
+/target
+**/*.rs.bk
+Cargo.lock
+
+# Large model files - do not commit to git
+model/
+models/
+*.gguf
+*.bin
+*.ggml

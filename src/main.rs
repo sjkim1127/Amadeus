@@ -1,0 +1,234 @@
+mod agent;
+mod avatar;
+mod llm;
+mod system;
+mod voice;
+
+use anyhow::Result;
+use bevy::prelude::*;
+use std::io::{self, Write};
+use std::sync::Arc;
+use std::thread;
+use tracing::Level;
+use tracing_subscriber::FmtSubscriber;
+
+use crate::agent::memory::MemoryManager;
+use crate::agent::persona::Persona;
+use crate::agent::tools::ToolDispatcher;
+use crate::llm::local::{LocalLlmClient, Message};
+
+// System Tools
+use crate::system::browser::BrowserTool;
+use crate::system::files::FileSystemTool;
+use crate::system::input::InputTool;
+use crate::system::screenshot::ScreenshotTool;
+
+// Voice
+use crate::voice::stt::SttManager;
+use crate::voice::tts::TtsManager;
+
+// Avatar
+use crate::avatar::expression::ExpressionPlugin;
+use crate::avatar::renderer::AvatarPlugin;
+
+const MODEL_PATH: &str = "model/localllm/Huihui-Qwen3-VL-32B-Instruct-abliterated.Q4_K_M.gguf";
+
+fn main() {
+    // 1. Spawn Agent Core in background thread
+    thread::spawn(move || {
+        let rt = tokio::runtime::Runtime::new().expect("Failed to create runtime");
+        rt.block_on(async {
+            if let Err(e) = run_agent_loop().await {
+                eprintln!("Agent Loop Error: {}", e);
+            }
+        });
+    });
+
+    // 2. Run Bevy App (Main Thread)
+    App::new()
+        .add_plugins(AvatarPlugin)
+        .add_plugins(ExpressionPlugin)
+        .run();
+}
+
+async fn run_agent_loop() -> Result<()> {
+    let subscriber = FmtSubscriber::builder()
+        .with_max_level(Level::ERROR)
+        .finish();
+    let _ = tracing::subscriber::set_global_default(subscriber);
+
+    println!("AMADEUS SYSTEM ONLINE.");
+
+    // Initialize Memory
+    let memory = MemoryManager::new("amadeus.db").await?;
+
+    // Initialize Local LLM
+    println!("[System] Loading LLM model... (this may take a moment)");
+    let client = Arc::new(
+        LocalLlmClient::new(MODEL_PATH).expect("Failed to initialize LLM. Check model path."),
+    );
+    println!("[System] LLM ready.");
+
+    // Initialize Persona
+    let persona = Persona::amadeus();
+
+    // Initialize Tools
+    let mut dispatcher = ToolDispatcher::new();
+    dispatcher.register(Box::new(ScreenshotTool));
+    dispatcher.register(Box::new(InputTool));
+    dispatcher.register(Box::new(FileSystemTool));
+    dispatcher.register(Box::new(BrowserTool));
+
+    // Initialize Voice
+    let stt = match SttManager::new("models/ggml-base.en.bin") {
+        Ok(s) => Some(s),
+        Err(e) => {
+            println!("Voice Input Unavailable: {}", e);
+            None
+        }
+    };
+
+    let tts = match TtsManager::new() {
+        Ok(t) => Some(t),
+        Err(e) => {
+            println!("Voice Output Unavailable: {}", e);
+            None
+        }
+    };
+
+    // Load History
+    let mut chat_history: Vec<Message> = memory.get_recent_history(50).await?;
+
+    // System Prompt
+    let tools_schema = dispatcher.get_tools_schema();
+    let tools_prompt = format!(
+        "\nYou have access to the following tools: {}\n\nTo use a tool, respond with a JSON object in this format ONLY:\n{{ \"tool\": \"tool_name\", \"args\": {{ ... }} }}\nIf you use a tool, do not write anything else.",
+        tools_schema
+    );
+    let full_system_prompt = format!("{}{}", persona.system_prompt, tools_prompt);
+
+    if chat_history.is_empty() {
+        let sys_msg = Message {
+            role: "system".to_string(),
+            content: full_system_prompt.clone(),
+            images: None,
+        };
+        memory.save_message(&sys_msg).await?;
+        chat_history.push(sys_msg);
+    }
+
+    println!("Amadeus ({}) is ready.", persona.name);
+    println!("Type 'listen' to record voice (if available).");
+
+    loop {
+        print!("> ");
+        io::stdout().flush()?;
+
+        let mut input = String::new();
+        io::stdin().read_line(&mut input)?;
+        let mut input = input.trim().to_string();
+
+        if input.eq_ignore_ascii_case("exit") || input.eq_ignore_ascii_case("quit") {
+            std::process::exit(0);
+        }
+
+        // Voice Command Trigger
+        if input.eq_ignore_ascii_case("listen") {
+            if let Some(stt_manager) = &stt {
+                println!("Recording for 5 seconds...");
+                match stt_manager.listen_once(5).await {
+                    Ok(text) => {
+                        println!("Heard: {}", text);
+                        if text.trim().is_empty() {
+                            continue;
+                        }
+                        input = text;
+                    }
+                    Err(e) => {
+                        println!("STT Error: {}", e);
+                        continue;
+                    }
+                }
+            } else {
+                println!("Voice input not configured.");
+                continue;
+            }
+        }
+
+        if input.is_empty() {
+            continue;
+        }
+
+        let user_msg = Message {
+            role: "user".to_string(),
+            content: input.to_string(),
+            images: None,
+        };
+        memory.save_message(&user_msg).await?;
+        chat_history.push(user_msg);
+
+        // --- Chat Loop ---
+        loop {
+            // Run LLM inference in a blocking task (it's CPU/GPU bound)
+            let messages_clone = chat_history.clone();
+            let client_clone = Arc::clone(&client);
+
+            let full_response =
+                tokio::task::spawn_blocking(move || client_clone.chat(messages_clone)).await??;
+
+            let assistant_msg = Message {
+                role: "assistant".to_string(),
+                content: full_response.clone(),
+                images: None,
+            };
+            memory.save_message(&assistant_msg).await?;
+            chat_history.push(assistant_msg);
+
+            // TTS
+            if let Some(tts_manager) = &tts {
+                if !full_response.trim().starts_with('{') {
+                    let _ = tts_manager.speak(&full_response);
+                }
+            }
+
+            // Tool Call Check
+            let maybe_tool_call: Option<serde_json::Value> =
+                serde_json::from_str(&full_response).ok();
+
+            if let Some(tool_json) = maybe_tool_call {
+                if let (Some(tool_name), Some(args)) = (
+                    tool_json.get("tool").and_then(|v| v.as_str()),
+                    tool_json.get("args"),
+                ) {
+                    println!("[System] Detected tool call: {}", tool_name);
+
+                    match dispatcher.execute(tool_name, args.clone()).await {
+                        Ok(result) => {
+                            println!("[System] Tool Output: {}", result);
+                            let result_msg = Message {
+                                role: "user".to_string(),
+                                content: format!("Tool Output: {}", result),
+                                images: None,
+                            };
+                            memory.save_message(&result_msg).await?;
+                            chat_history.push(result_msg);
+                            continue;
+                        }
+                        Err(e) => {
+                            println!("[System] Tool Error: {}", e);
+                            let error_msg = Message {
+                                role: "user".to_string(),
+                                content: format!("Tool Error: {}", e),
+                                images: None,
+                            };
+                            memory.save_message(&error_msg).await?;
+                            chat_history.push(error_msg);
+                            continue;
+                        }
+                    }
+                }
+            }
+            break;
+        }
+    }
+}
