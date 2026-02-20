@@ -160,6 +160,24 @@ async fn run_agent_loop(
             continue;
         }
 
+        // ⑤ Handle Clear Chat command from UI
+        if input == "__CLEAR__" {
+            chat_history.clear();
+            // Re-add system prompt
+            let sys_msg = Message {
+                role: "system".to_string(),
+                content: full_system_prompt.clone(),
+                images: None,
+            };
+            chat_history.push(sys_msg);
+            let _ = agent_tx.send(Message {
+                role: "assistant".to_string(),
+                content: "대화 기록이 초기화되었습니다.".into(),
+                images: None,
+            });
+            continue;
+        }
+
         let user_msg = Message {
             role: "user".to_string(),
             content: input.to_string(),
@@ -173,19 +191,10 @@ async fn run_agent_loop(
             // Run LLM inference with streaming — each token is sent to UI in real-time
             let messages_clone = chat_history.clone();
             let client_clone = Arc::clone(&client);
-            let stream_tx = agent_tx.clone();
 
             let full_response = tokio::task::spawn_blocking(move || {
-                // Create a streaming placeholder message in the UI
-                let _ = stream_tx.send(Message {
-                    role: "assistant".to_string(),
-                    content: "▌".to_string(), // typing indicator
-                    images: None,
-                });
-
                 client_clone.chat_streaming(messages_clone, |_piece| {
                     // Token arrives — could send incremental updates here
-                    // For now, the full response is sent after completion
                 })
             })
             .await??;
@@ -219,8 +228,21 @@ async fn run_agent_loop(
                 ) {
                     println!("[System] Detected tool call: {}", tool_name);
 
+                    // ④ Send tool status to UI as system message
+                    let _ = agent_tx.send(Message {
+                        role: "system".to_string(),
+                        content: format!("Tool '{}' を実行中...", tool_name),
+                        images: None,
+                    });
+
                     match dispatcher.execute(tool_name, args.clone()).await {
                         Ok(result) => {
+                            // Send tool result to UI
+                            let _ = agent_tx.send(Message {
+                                role: "system".to_string(),
+                                content: format!("✅ Tool '{}' 완료", tool_name),
+                                images: None,
+                            });
                             let result_msg = Message {
                                 role: "user".to_string(),
                                 content: format!("Tool Output: {}", result),
@@ -231,6 +253,11 @@ async fn run_agent_loop(
                             continue;
                         }
                         Err(e) => {
+                            let _ = agent_tx.send(Message {
+                                role: "system".to_string(),
+                                content: format!("❌ Tool '{}' 오류: {}", tool_name, e),
+                                images: None,
+                            });
                             let error_msg = Message {
                                 role: "user".to_string(),
                                 content: format!("Tool Error: {}", e),
