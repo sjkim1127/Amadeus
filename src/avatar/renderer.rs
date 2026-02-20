@@ -1,4 +1,6 @@
 use bevy::prelude::*;
+use bevy_vrm::mtoon::MtoonSun;
+use bevy_vrm::{VrmInstance, VrmPlugins};
 
 pub struct AvatarPlugin;
 
@@ -15,6 +17,9 @@ impl Plugin for AvatarPlugin {
             }),
             ..default()
         }))
+        // VrmPlugins supports actual .vrm files and SpringBones physics
+        .add_plugins(VrmPlugins)
+        // Transparent background to act like a floating desktop widget (Tauri style)
         .insert_resource(ClearColor(Color::NONE))
         .add_systems(Startup, setup_scene)
         .add_systems(Update, animate_idle_pose);
@@ -32,16 +37,19 @@ fn setup_scene(mut commands: Commands, asset_server: Res<AssetServer>) {
         ..default()
     },));
 
-    // Light
-    commands.spawn(DirectionalLightBundle {
-        directional_light: DirectionalLight {
-            illuminance: 10000.0,
-            shadows_enabled: true,
+    // Light with MtoonSun marker for proper VRM shading
+    commands.spawn((
+        DirectionalLightBundle {
+            directional_light: DirectionalLight {
+                illuminance: 10000.0,
+                shadows_enabled: true,
+                ..default()
+            },
+            transform: Transform::from_xyz(4.0, 10.0, 4.0).looking_at(Vec3::ZERO, Vec3::Y),
             ..default()
         },
-        transform: Transform::from_xyz(4.0, 10.0, 4.0).looking_at(Vec3::ZERO, Vec3::Y),
-        ..default()
-    });
+        MtoonSun,
+    ));
 
     // Ambient Light
     commands.insert_resource(AmbientLight {
@@ -49,19 +57,16 @@ fn setup_scene(mut commands: Commands, asset_server: Res<AssetServer>) {
         brightness: 300.0,
     });
 
-    // Load VRM model as glTF scene
-    // VRM is glTF binary — use .glb symlink so Bevy's glTF loader recognizes it
-    let avatar_scene: Handle<Scene> = asset_server.load("model/vrm/KurisuMakise.glb#Scene0");
-
+    // Load actual VRM file using VrmInstance
     commands.spawn((
-        SceneBundle {
-            scene: avatar_scene,
-            // Face the camera by rotating 180 degrees (PI radians) around the Y axis
-            transform: Transform::from_xyz(0.0, -0.2, 0.0)
-                .with_rotation(Quat::from_rotation_y(std::f32::consts::PI))
-                .with_scale(Vec3::splat(1.0)),
-            ..default()
-        },
+        Transform::from_xyz(0.0, -0.2, 0.0)
+            .with_rotation(Quat::from_rotation_y(std::f32::consts::PI))
+            .with_scale(Vec3::splat(1.0)),
+        GlobalTransform::default(),
+        Visibility::default(),
+        InheritedVisibility::default(),
+        ViewVisibility::default(),
+        VrmInstance(asset_server.load("model/vrm/KurisuMakise.vrm")),
         AvatarComponent,
     ));
 }
