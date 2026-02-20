@@ -4,6 +4,7 @@ import { OrbitControls } from "@react-three/drei";
 import * as THREE from "three";
 import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader.js";
 import { VRMLoaderPlugin, VRM } from "@pixiv/three-vrm";
+import { loadMixamoAnimation } from "../utils/loadMixamoAnimation";
 
 // Avatar state types
 export type AvatarState = "idle" | "thinking" | "speaking";
@@ -24,14 +25,13 @@ const VrmModel: React.FC<VrmModelProps> = ({ avatarState, emotion }) => {
     const { scene } = useThree();
     const clockRef = useRef(new THREE.Clock());
 
-    // Smooth animation targets
+    // Mixamo Animation System
+    const mixerRef = useRef<THREE.AnimationMixer | null>(null);
+    const actionsRef = useRef<Record<string, THREE.AnimationAction>>({});
+    const currentActionRef = useRef<THREE.AnimationAction | null>(null);
+
+    // Emotion target states
     const animState = useRef({
-        mouthOpen: 0,
-        headTiltX: 0,
-        headTiltY: 0,
-        headTiltZ: 0,
-        eyeSquint: 0,
-        browUp: 0,
         happy: 0,
         angry: 0,
         surprised: 0,
@@ -44,54 +44,69 @@ const VrmModel: React.FC<VrmModelProps> = ({ avatarState, emotion }) => {
 
         loader.load(
             "/model/vrm/KurisuMakise.vrm",
-            (gltf) => {
+            async (gltf) => {
                 const vrmData = gltf.userData.vrm as VRM;
-                if (vrmData) {
-                    vrmData.scene.rotation.y = Math.PI;
+                if (!vrmData) return;
 
-                    // Set natural rest pose (override T-pose)
-                    const h = vrmData.humanoid;
-                    if (h) {
-                        // Arms down naturally
-                        const lUpperArm = h.getNormalizedBoneNode("leftUpperArm");
-                        const rUpperArm = h.getNormalizedBoneNode("rightUpperArm");
-                        const lLowerArm = h.getNormalizedBoneNode("leftLowerArm");
-                        const rLowerArm = h.getNormalizedBoneNode("rightLowerArm");
-                        const lHand = h.getNormalizedBoneNode("leftHand");
-                        const rHand = h.getNormalizedBoneNode("rightHand");
+                vrmData.scene.rotation.y = Math.PI;
 
-                        if (lUpperArm) {
-                            lUpperArm.rotation.z = 1.2;  // Arm down
-                            lUpperArm.rotation.x = 0.1;  // Slightly forward
+                // Set natural rest pose fallback (override T-pose immediately)
+                const h = vrmData.humanoid;
+                if (h) {
+                    const lUpperArm = h.getNormalizedBoneNode("leftUpperArm");
+                    const rUpperArm = h.getNormalizedBoneNode("rightUpperArm");
+                    const lLowerArm = h.getNormalizedBoneNode("leftLowerArm");
+                    const rLowerArm = h.getNormalizedBoneNode("rightLowerArm");
+                    const lHand = h.getNormalizedBoneNode("leftHand");
+                    const rHand = h.getNormalizedBoneNode("rightHand");
+
+                    if (lUpperArm) { lUpperArm.rotation.z = 1.2; lUpperArm.rotation.x = 0.1; }
+                    if (rUpperArm) { rUpperArm.rotation.z = -1.2; rUpperArm.rotation.x = 0.1; }
+                    if (lLowerArm) { lLowerArm.rotation.z = 0.15; }
+                    if (rLowerArm) { rLowerArm.rotation.z = -0.15; }
+                    if (lHand) lHand.rotation.z = 0.1;
+                    if (rHand) rHand.rotation.z = -0.1;
+                }
+
+                scene.add(vrmData.scene);
+                setVrm(vrmData);
+                console.log("[VRM] Model loaded");
+
+                // Initialize AnimationMixer
+                const mixer = new THREE.AnimationMixer(vrmData.scene);
+                mixerRef.current = mixer;
+
+                // Load Mixamo FBX animations
+                const anims = [
+                    { name: 'idle', url: '/model/animations/idle.fbx' },
+                    { name: 'thinking', url: '/model/animations/thinking.fbx' },
+                    { name: 'speaking', url: '/model/animations/speaking.fbx' },
+                ];
+
+                for (const anim of anims) {
+                    try {
+                        const clip = await loadMixamoAnimation(anim.url, vrmData);
+                        if (clip) {
+                            console.log(`[VRM] Loaded ${anim.name} with ${clip.tracks.length} tracks`);
+                            const action = mixer.clipAction(clip);
+                            action.play();
+                            action.weight = 0; // Start faded out
+                            actionsRef.current[anim.name] = action;
+                        } else {
+                            console.warn(`[VRM] Failed to parse clip for ${anim.name}`);
                         }
-                        if (rUpperArm) {
-                            rUpperArm.rotation.z = -1.2;
-                            rUpperArm.rotation.x = 0.1;
-                        }
-                        if (lLowerArm) {
-                            lLowerArm.rotation.z = 0.15; // Slight bend
-                            lLowerArm.rotation.y = 0.0;
-                        }
-                        if (rLowerArm) {
-                            rLowerArm.rotation.z = -0.15;
-                            rLowerArm.rotation.y = 0.0;
-                        }
-                        if (lHand) lHand.rotation.z = 0.1;
-                        if (rHand) rHand.rotation.z = -0.1;
+                    } catch (e) {
+                        console.error(`[VRM] Failed to load animation ${anim.name}:`, e);
                     }
+                }
 
-                    scene.add(vrmData.scene);
-                    setVrm(vrmData);
-                    console.log("[VRM] Model loaded:", vrmData);
+                // Start idle animation
+                if (actionsRef.current['idle']) {
+                    actionsRef.current['idle'].weight = 1;
+                    currentActionRef.current = actionsRef.current['idle'];
                 }
             },
-            (progress) => {
-                console.log(
-                    "[VRM] Loading:",
-                    Math.round((progress.loaded / progress.total) * 100),
-                    "%"
-                );
-            },
+            (progress) => { },
             (error) => {
                 console.error("[VRM] Failed to load:", error);
             }
@@ -106,16 +121,48 @@ const VrmModel: React.FC<VrmModelProps> = ({ avatarState, emotion }) => {
                     }
                 });
             }
+            if (mixerRef.current) {
+                mixerRef.current.stopAllAction();
+            }
         };
     }, []);
 
+    // Handle State Changes (Crossfade Animations)
+    useEffect(() => {
+        const newActionName = avatarState; // 'idle', 'thinking', 'speaking'
+        const newAction = actionsRef.current[newActionName] || actionsRef.current['idle'];
+
+        if (newAction && currentActionRef.current !== newAction) {
+            const previousAction = currentActionRef.current;
+            currentActionRef.current = newAction;
+
+            // Smooth crossfade over 0.5 seconds
+            if (previousAction) {
+                newAction.reset().play();
+                newAction.setEffectiveTimeScale(1);
+                newAction.setEffectiveWeight(1);
+                newAction.crossFadeFrom(previousAction, 0.5, true);
+            } else {
+                newAction.play();
+                newAction.weight = 1;
+            }
+        }
+    }, [avatarState]);
+
+    // Handle Frame updates (Mixer & Emotion Blending)
     useFrame(() => {
         if (!vrm) return;
 
         const delta = clockRef.current.getDelta();
         const t = clockRef.current.getElapsedTime();
         const s = animState.current;
-        const lerpSpeed = 8 * delta; // Smooth transitions
+        const lerpSpeed = 8 * delta;
+
+        // Update AnimationMixer!
+        // This drives all body bone rotations/positions based on Mixamo clips
+        if (mixerRef.current) {
+            mixerRef.current.update(delta);
+        }
 
         // ===== Emotion Targets =====
         const emotionTargets = {
@@ -129,75 +176,12 @@ const VrmModel: React.FC<VrmModelProps> = ({ avatarState, emotion }) => {
         s.surprised = lerp(s.surprised, emotionTargets.surprised, lerpSpeed);
         s.sad = lerp(s.sad, emotionTargets.sad, lerpSpeed);
 
-        // ===== State-driven Animation =====
-        const head = vrm.humanoid?.getNormalizedBoneNode("head");
-        const chest = vrm.humanoid?.getNormalizedBoneNode("chest");
-        const spine = vrm.humanoid?.getNormalizedBoneNode("spine");
-
-        switch (avatarState) {
-            case "speaking": {
-                // Lip sync: rapid mouth movement simulating speech
-                const vowelCycle = Math.abs(Math.sin(t * 12.0));
-                const consonantPause = Math.sin(t * 3.0) > 0.3 ? 1.0 : 0.2;
-                s.mouthOpen = lerp(s.mouthOpen, vowelCycle * consonantPause * 0.6, lerpSpeed * 2);
-
-                // Slight head movement while talking
-                s.headTiltY = lerp(s.headTiltY, Math.sin(t * 1.5) * 0.06, lerpSpeed);
-                s.headTiltX = lerp(s.headTiltX, Math.sin(t * 0.8) * 0.03, lerpSpeed);
-
-                // Upper body micro-movement
-                if (spine) {
-                    spine.rotation.y = Math.sin(t * 1.0) * 0.015;
-                }
-                break;
-            }
-
-            case "thinking": {
-                // Close mouth
-                s.mouthOpen = lerp(s.mouthOpen, 0, lerpSpeed);
-
-                // Tilt head to the side (tsundere thinking pose)
-                s.headTiltZ = lerp(s.headTiltZ, Math.sin(t * 0.3) * 0.08 + 0.05, lerpSpeed);
-                s.headTiltX = lerp(s.headTiltX, -0.04, lerpSpeed); // Look down slightly
-                s.headTiltY = lerp(s.headTiltY, 0.02, lerpSpeed);
-
-                // Slight body sway
-                if (spine) {
-                    spine.rotation.z = Math.sin(t * 0.5) * 0.01;
-                }
-                break;
-            }
-
-            case "idle":
-            default: {
-                // Close mouth
-                s.mouthOpen = lerp(s.mouthOpen, 0, lerpSpeed);
-
-                // Gentle head sway
-                s.headTiltY = lerp(s.headTiltY, Math.sin(t * 0.5) * 0.02, lerpSpeed);
-                s.headTiltX = lerp(s.headTiltX, Math.sin(t * 0.3) * 0.01, lerpSpeed);
-                s.headTiltZ = lerp(s.headTiltZ, 0, lerpSpeed);
-
-                // Reset spine
-                if (spine) {
-                    spine.rotation.y = lerp(spine.rotation.y, 0, lerpSpeed);
-                    spine.rotation.z = lerp(spine.rotation.z, 0, lerpSpeed);
-                }
-                break;
-            }
-        }
-
-        // ===== Apply Head Rotation =====
-        if (head) {
-            head.rotation.x = s.headTiltX;
-            head.rotation.y = s.headTiltY;
-            head.rotation.z = s.headTiltZ;
-        }
-
-        // ===== Breathing (always active) =====
-        const breathe = Math.sin(t * 2.0) * 0.008;
-        if (chest) {
-            chest.scale.set(1.0 + breathe, 1.0 + breathe, 1.0 + breathe * 1.5);
+        // ===== Lip Sync (When speaking) =====
+        let mouthOpen = 0;
+        if (avatarState === "speaking") {
+            const vowelCycle = Math.abs(Math.sin(t * 12.0));
+            const consonantPause = Math.sin(t * 3.0) > 0.3 ? 1.0 : 0.2;
+            mouthOpen = vowelCycle * consonantPause * 0.6;
         }
 
         // ===== Blink (always active, faster when surprised) =====
@@ -211,18 +195,13 @@ const VrmModel: React.FC<VrmModelProps> = ({ avatarState, emotion }) => {
         // ===== Apply Expressions =====
         const em = vrm.expressionManager;
         if (em) {
-            // Mouth
-            em.setValue("aa", s.mouthOpen * 0.8);
-            em.setValue("oh", s.mouthOpen * 0.3 * Math.sin(t * 6.0 + 1.0));
-
-            // Blink (reduced when surprised)
+            em.setValue("aa", mouthOpen * 0.8);
+            em.setValue("oh", mouthOpen * 0.3 * Math.sin(t * 6.0 + 1.0));
             em.setValue("blink", emotion === "surprised" ? blinkWeight * 0.3 : blinkWeight);
-
-            // Emotions (smooth blending)
             em.setValue("happy", s.happy);
             em.setValue("angry", s.angry);
             em.setValue("surprised", s.surprised);
-            em.setValue("relaxed", s.sad); // Use 'relaxed' as sad fallback
+            em.setValue("relaxed", s.sad);
         }
 
         vrm.update(delta);
