@@ -198,9 +198,13 @@ async fn run_agent_loop(
             content: input.to_string(),
             images: None,
         };
-        memory.save_message(&user_msg).await?;
+        if let Err(e) = memory.save_message(&user_msg).await {
+            eprintln!("[Memory] Failed to save message: {}", e);
+        }
         chat_history.push(user_msg);
 
+        // Echo user message to frontend (backend = single source of truth)
+        emit_chat(&app, "user", &input);
         emit_status(&app, "Thinking", true);
 
         // Chat Loop
@@ -208,14 +212,25 @@ async fn run_agent_loop(
             let messages_clone = chat_history.clone();
             let client_clone = Arc::clone(&client);
 
-            let full_response = client_clone.chat(messages_clone).await?;
+            let full_response = match client_clone.chat(messages_clone).await {
+                Ok(r) => r,
+                Err(e) => {
+                    let err_msg = format!("❌ LLM Error: {}", e);
+                    eprintln!("[LLM] {}", err_msg);
+                    emit_chat(&app, "system", &err_msg);
+                    emit_status(&app, "Error - retry your message", false);
+                    break;
+                }
+            };
 
             let assistant_msg = Message {
                 role: "assistant".to_string(),
                 content: full_response.clone(),
                 images: None,
             };
-            memory.save_message(&assistant_msg).await?;
+            if let Err(e) = memory.save_message(&assistant_msg).await {
+                eprintln!("[Memory] Failed to save message: {}", e);
+            }
             chat_history.push(assistant_msg);
             emit_chat(&app, "assistant", &full_response);
             emit_status(&app, "Online", false);
