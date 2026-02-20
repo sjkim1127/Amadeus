@@ -3,12 +3,15 @@ use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 use std::sync::{Arc, Mutex};
 use whisper_rs::{FullParams, SamplingStrategy, WhisperContext, WhisperContextParameters};
 
+#[allow(dead_code)]
 const MODEL_PATH: &str = "models/ggml-base.en.bin";
 
+#[allow(dead_code)]
 pub struct SttManager {
     ctx: WhisperContext,
 }
 
+#[allow(dead_code)]
 impl SttManager {
     pub fn new(model_path: &str) -> Result<Self> {
         // Just check if file exists, if not warn but try loading or error out

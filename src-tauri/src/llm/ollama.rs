@@ -28,6 +28,7 @@ pub struct Message {
     pub images: Option<Vec<String>>,
 }
 
+#[allow(dead_code)]
 #[derive(Deserialize, Debug)]
 pub struct ChatResponse {
     pub model: Option<String>,
@@ -36,6 +37,7 @@ pub struct ChatResponse {
     pub done: Option<bool>,
 }
 
+#[allow(dead_code)]
 #[derive(Deserialize, Debug)]
 pub struct MessageRes {
     pub role: String,
@@ -92,6 +94,7 @@ impl OllamaClient {
     }
 
     /// Streaming chat: returns a stream of content chunks
+    #[allow(dead_code)]
     pub async fn chat_stream(
         &self,
         messages: Vec<Message>,

@@ -71,6 +71,7 @@ impl MemoryManager {
         Ok(messages)
     }
 
+    #[allow(dead_code)]
     pub async fn clear_history(&self) -> Result<()> {
         sqlx::query("DELETE FROM messages")
             .execute(&self.pool)

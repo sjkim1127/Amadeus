@@ -28,10 +28,6 @@ impl ToolDispatcher {
         self.tools.insert(tool.name().to_string(), tool);
     }
 
-    pub fn get_tool(&self, name: &str) -> Option<&Box<dyn Tool>> {
-        self.tools.get(name)
-    }
-
     pub fn get_tools_schema(&self) -> Value {
         let mut schemas = Vec::new();
         for tool in self.tools.values() {

@@ -1,5 +1,3 @@
-use crate::llm::Message;
-
 pub struct Persona {
     pub name: String,
     pub system_prompt: String,
@@ -22,14 +20,6 @@ CRITICAL RULES:
 
 You are running locally on the user's Mac and have access to system tools, but you should only use them when specifically requested.
 ".to_string(),
-        }
-    }
-
-    pub fn to_message(&self) -> Message {
-        Message {
-            role: "system".to_string(),
-            content: self.system_prompt.clone(),
-            images: None,
         }
     }
 }
